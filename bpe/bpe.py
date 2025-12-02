@@ -100,7 +100,8 @@ def pre_tokenize_file(
                 f.seek(start)
                 chunk = f.read(end - start).decode("utf-8", errors="ignore")
                 futures.append(executor.submit(pre_tokenize, chunk, special_tokens))
-            for future in as_completed(futures):
+            # Process futures in order to ensure deterministic behavior
+            for future in futures:
                 pre_tokens: list[str] = future.result()
                 for pre_token in pre_tokens:
                     vocab[pre_token.encode("utf-8", errors="ignore")] += 1
@@ -181,10 +182,10 @@ def run_train_bpe(
             continue
         vocab[len(vocab)] = most_common_pair_bytes
         original_pairs = merged_to_pairs[most_common_pair_bytes]
-        for original_pair in original_pairs:
+        for original_pair in sorted(original_pairs):
             merges.append(original_pair)
         merged_to_pairs.pop(most_common_pair_bytes)
-
+        pairs_to_update = set[bytes]()
         for index in list(pair_to_pre_token_index_set[most_common_pair_bytes]):
             pre_token, pre_token_count = pre_token_count_arr[index]
             new_pre_token_list = []
@@ -208,7 +209,6 @@ def run_train_bpe(
                 pair_counter[old_pair_bytes] -= pre_token_count
                 pair_to_pre_token_index_set[old_pair_bytes].discard(index)
 
-            new_pair_bytes_set = set[bytes]()
             for j in range(0, len(new_pre_token_list) - 1):
                 # add new pairs
                 new_pair = new_pre_token_list[j : j + 2]
@@ -216,16 +216,16 @@ def run_train_bpe(
                 merged_to_pairs[new_pair_bytes].add((new_pair[0], new_pair[1]))
                 pair_counter[new_pair_bytes] += pre_token_count
                 pair_to_pre_token_index_set[new_pair_bytes].add(index)
-                if (
-                    new_pair[0] == most_common_pair_bytes
-                    or new_pair[1] == most_common_pair_bytes
-                ):
-                    new_pair_bytes_set.add(new_pair_bytes)
-            for new_pair_bytes in new_pair_bytes_set:
-                heapq.heappush(
-                    pair_count_heap, (-pair_counter[new_pair_bytes], new_pair_bytes)
-                )
+                # Track this pair for heap update
+                pairs_to_update.add(new_pair_bytes)
 
             pre_token_count_arr[index] = (new_pre_token_list, pre_token_count)
+
+        # Now push all updated pairs onto the heap with their final counts
+        for pair_bytes in pairs_to_update:
+            heapq.heappush(
+                pair_count_heap,
+                (-pair_counter[pair_bytes], pair_bytes),
+            )
 
     return vocab, merges

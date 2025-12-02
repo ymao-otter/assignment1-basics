@@ -1,6 +1,7 @@
 from collections import Counter, defaultdict
 import os
 import heapq
+import json
 from pathlib import Path
 from typing import BinaryIO, Generator
 import regex
@@ -247,3 +248,50 @@ def run_train_bpe(
             )
 
     return vocab, merges
+
+
+def train_bpe_to_files(
+    input_path: str | os.PathLike,
+    vocab_size: int,
+    special_tokens: list[str],
+    vocab_output_path: str | os.PathLike,
+    merges_output_path: str | os.PathLike,
+    **kwargs,
+) -> None:
+    """Train a BPE tokenizer and save the vocabulary and merges to files.
+
+    This function calls run_train_bpe and persists the results in standard BPE format:
+    - Vocabulary saved as JSON (token string -> token ID mapping)
+    - Merges saved as text file (space-separated token pairs, one per line)
+
+    Args:
+        input_path (str | os.PathLike): Path to BPE tokenizer training data.
+        vocab_size (int): Total number of items in the tokenizer's vocabulary (including special tokens).
+        special_tokens (list[str]): A list of string special tokens to be added to the tokenizer vocabulary.
+        vocab_output_path (str | os.PathLike): Path where the vocabulary JSON file will be saved.
+        merges_output_path (str | os.PathLike): Path where the merges text file will be saved.
+        **kwargs: Additional arguments passed to run_train_bpe.
+
+    Returns:
+        None. Results are written to the specified output files.
+    """
+    # Train the BPE tokenizer
+    vocab, merges = run_train_bpe(input_path, vocab_size, special_tokens, **kwargs)
+
+    # Save vocabulary as JSON (inverted: token string -> token ID)
+    vocab_dict = {}
+    for token_id, token_bytes in vocab.items():
+        # Decode bytes to string, use UTF-8 with replacement for non-UTF8 bytes
+        token_str = token_bytes.decode("utf-8", errors="replace")
+        vocab_dict[token_str] = token_id
+
+    with open(vocab_output_path, "w", encoding="utf-8") as f:
+        json.dump(vocab_dict, f, indent=4, ensure_ascii=True)
+
+    # Save merges as space-separated text file
+    with open(merges_output_path, "w", encoding="utf-8") as f:
+        for token1, token2 in merges:
+            # Decode both tokens to strings
+            token1_str = token1.decode("utf-8", errors="replace")
+            token2_str = token2.decode("utf-8", errors="replace")
+            f.write(f"{token1_str} {token2_str}\n")

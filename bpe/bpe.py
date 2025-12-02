@@ -185,7 +185,7 @@ def run_train_bpe(
             merges.append(original_pair)
         merged_to_pairs.pop(most_common_pair_bytes)
 
-        for index in pair_to_pre_token_index_set[most_common_pair_bytes]:
+        for index in list(pair_to_pre_token_index_set[most_common_pair_bytes]):
             pre_token, pre_token_count = pre_token_count_arr[index]
             new_pre_token_list = []
             j = 0

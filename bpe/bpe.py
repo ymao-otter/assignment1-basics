@@ -1,6 +1,6 @@
 from collections import Counter, defaultdict
 import os
-
+import heapq
 from pathlib import Path
 from typing import BinaryIO, Generator
 import regex
@@ -78,16 +78,20 @@ def find_chunk_boundaries(
 #         # Run pre-tokenization on your chunk and store the counts for each pre-token
 
 
-def pre_tokenize(chunk: str, special_tokens: list[str]) -> Generator[str, None, None]:
+def pre_tokenize(chunk: str, special_tokens: list[str]) -> list[str]:
     pattern = "|".join([regex.escape(t) for t in special_tokens])
+    pre_tokens = []
     for sub_chunk in regex.splititer(pattern, chunk):
         for match in regex.finditer(PAT, sub_chunk):
-            yield match.group()
+            pre_tokens.append(match.group())
+    return pre_tokens
 
 
-def pre_tokenize_file(input_path: str | os.PathLike, special_tokens: list[str]) ->dict[str, int]:
+def pre_tokenize_file(
+    input_path: str | os.PathLike, special_tokens: list[str]
+) -> dict[bytes, int]:
     num_processes = mp.cpu_count()
-    vocab = Counter()
+    vocab = Counter[bytes]()
     with open_binary(input_path) as f:
         boundaries = find_chunk_boundaries(f, num_processes, END_OF_TEXT)
         with ProcessPoolExecutor(max_workers=num_processes) as executor:
@@ -97,10 +101,11 @@ def pre_tokenize_file(input_path: str | os.PathLike, special_tokens: list[str]) 
                 chunk = f.read(end - start).decode("utf-8", errors="ignore")
                 futures.append(executor.submit(pre_tokenize, chunk, special_tokens))
             for future in as_completed(futures):
-                pre_tokens = future.result()
+                pre_tokens: list[str] = future.result()
                 for pre_token in pre_tokens:
-                    vocab[pre_token] += 1
+                    vocab[pre_token.encode("utf-8", errors="ignore")] += 1
     return vocab
+
 
 def run_train_bpe(
     input_path: str | os.PathLike,
@@ -130,41 +135,97 @@ def run_train_bpe(
                 Merges are ordered by order of creation.
     """
     pre_tokenized_vocab = pre_tokenize_file(input_path, special_tokens)
-    vocab = {END_OF_TEXT: 0}
-    for c in range(1, 256):
-        vocab[chr(c).encode("utf-8")] = len(vocab)
+    vocab = {0: END_OF_TEXT}
     for token in special_tokens:
         encoded_token = token.encode("utf-8")
         if encoded_token != END_OF_TEXT:
-            vocab[encoded_token] = len(vocab)
+            vocab[len(vocab)] = encoded_token
+    merges: list[tuple[bytes, bytes]] = []
+    for c in range(256):
+        vocab[len(vocab)] = bytes([c])
+
     # p1, p2
     # max
     # pair -> pre_token list -> new pairs -> add new pairs, remove old pairs
-    pre_token_count_arr = []
+    pre_token_count_arr: list[tuple[list[bytes], int]] = []
     for pre_token, count in pre_tokenized_vocab.items():
-        pre_token_count_arr.append((list(pre_token.encode("utf-8")), count))
-    
-    pair_counter = Counter()
-    pair_to_pre_token_index_set = defaultdict(set)
+        pre_token_count_arr.append(
+            ([pre_token[i : i + 1] for i in range(0, len(pre_token))], count)
+        )
 
-    for i, (pre_token, count) in enumerate(pre_token_count_arr):
+    pair_counter = Counter[bytes]()
+    pair_count_heap: list[tuple[int, bytes]] = []
+
+    pair_to_pre_token_index_set = defaultdict[bytes, set[int]](set)
+
+    merged_to_pairs: dict[bytes, set[tuple[bytes, bytes]]] = defaultdict[
+        bytes, set[tuple[bytes, bytes]]
+    ](set)
+
+    for pre_token_index, (pre_token, count) in enumerate(pre_token_count_arr):
         for i in range(0, len(pre_token) - 1):
-            pair = pre_token[i:i+2]
-            pair_str = ''.join(pair)
-            pair_counter[pair_str] += count
-            pair_to_pre_token_index_set[pair_str].add(i)
+            pair = pre_token[i : i + 2]
+            pair_bytes = pair[0] + pair[1]
+            pair_counter[pair_bytes] += count
+            pair_to_pre_token_index_set[pair_bytes].add(pre_token_index)
+            merged_to_pairs[pair_bytes].add((pair[0], pair[1]))
+
+    for pair, count in pair_counter.items():
+        heapq.heappush(pair_count_heap, (-count, pair))
 
     while len(vocab) < vocab_size:
-        most_common_pair = max(pair_counter.items(), key=lambda x: (x[1], x[0]))
-        pair = most_common_pair[0]
-        dec = 0
-        new_pair = pair[0] + pair[1]
-        new_pair_list = 
-        for index in pair_to_pre_token_index_set[pair]:
+        most_common_pair = heapq.heappop(pair_count_heap)
+        most_common_pair_count = most_common_pair[0]
+        most_common_pair_bytes = most_common_pair[1]
+        if most_common_pair_count != -pair_counter[most_common_pair_bytes]:
+            continue
+        vocab[len(vocab)] = most_common_pair_bytes
+        original_pairs = merged_to_pairs[most_common_pair_bytes]
+        for original_pair in original_pairs:
+            merges.append(original_pair)
+        merged_to_pairs.pop(most_common_pair_bytes)
+
+        for index in pair_to_pre_token_index_set[most_common_pair_bytes]:
             pre_token, pre_token_count = pre_token_count_arr[index]
             new_pre_token_list = []
-            for j in range(0, len(pre_token) - 1):
+            j = 0
+            while j < len(pre_token) - 1:
+                new_pair = pre_token[j : j + 2]
+                new_pair_bytes = new_pair[0] + new_pair[1]
+                if new_pair_bytes == most_common_pair_bytes:
+                    j += 2
+                    new_pre_token_list.append(new_pair_bytes)
+                else:
+                    new_pre_token_list.append(pre_token[j])
+                    j += 1
+            if j < len(pre_token):
+                new_pre_token_list.append(pre_token[j])
 
-        
-    
+            for j in range(0, len(pre_token) - 1):
+                # invalidate old pairs
+                old_pair = pre_token[j : j + 2]
+                old_pair_bytes = old_pair[0] + old_pair[1]
+                pair_counter[old_pair_bytes] -= pre_token_count
+                pair_to_pre_token_index_set[old_pair_bytes].discard(index)
+
+            new_pair_bytes_set = set[bytes]()
+            for j in range(0, len(new_pre_token_list) - 1):
+                # add new pairs
+                new_pair = new_pre_token_list[j : j + 2]
+                new_pair_bytes = new_pair[0] + new_pair[1]
+                merged_to_pairs[new_pair_bytes].add((new_pair[0], new_pair[1]))
+                pair_counter[new_pair_bytes] += pre_token_count
+                pair_to_pre_token_index_set[new_pair_bytes].add(index)
+                if (
+                    new_pair[0] == most_common_pair_bytes
+                    or new_pair[1] == most_common_pair_bytes
+                ):
+                    new_pair_bytes_set.add(new_pair_bytes)
+            for new_pair_bytes in new_pair_bytes_set:
+                heapq.heappush(
+                    pair_count_heap, (-pair_counter[new_pair_bytes], new_pair_bytes)
+                )
+
+            pre_token_count_arr[index] = (new_pre_token_list, pre_token_count)
+
     return vocab, merges

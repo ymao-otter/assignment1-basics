@@ -179,47 +179,42 @@ def run_train_bpe(
             ([pre_token[i : i + 1] for i in range(0, len(pre_token))], count)
         )
 
-    pair_counter = Counter[bytes]()
-    pair_count_heap: list[tuple[int, ReverseTuple, bytes]] = []
+    # Track pairs by their actual token composition, not concatenated bytes
+    pair_counter = Counter[tuple[bytes, bytes]]()
+    pair_count_heap: list[tuple[int, ReverseTuple, tuple[bytes, bytes]]] = []
 
-    pair_to_pre_token_index_set = defaultdict[bytes, set[int]](set)
-
-    # Track ALL possible representations of each pair_bytes for tie-breaking
-    pair_to_representations: dict[bytes, set[tuple[bytes, bytes]]] = defaultdict(set)
+    # Map each pair to the set of pre-token indices where it appears
+    pair_to_pre_token_index_set = defaultdict[tuple[bytes, bytes], set[int]](set)
 
     for pre_token_index, (pre_token, count) in enumerate(pre_token_count_arr):
         for i in range(0, len(pre_token) - 1):
-            pair = pre_token[i : i + 2]
-            pair_bytes = pair[0] + pair[1]
-            pair_counter[pair_bytes] += count
-            pair_to_pre_token_index_set[pair_bytes].add(pre_token_index)
-            pair_to_representations[pair_bytes].add((pair[0], pair[1]))
+            pair_tuple = (pre_token[i], pre_token[i + 1])
+            pair_counter[pair_tuple] += count
+            pair_to_pre_token_index_set[pair_tuple].add(pre_token_index)
 
-    for pair_bytes, count in sorted(pair_counter.items()):
-        # Use the lexicographically greatest representation for tie-breaking
-        pair_tuple = max(pair_to_representations[pair_bytes])
-        heapq.heappush(pair_count_heap, (-count, ReverseTuple(pair_tuple), pair_bytes))
+    for pair_tuple, count in sorted(pair_counter.items()):
+        heapq.heappush(pair_count_heap, (-count, ReverseTuple(pair_tuple), pair_tuple))
 
     while len(vocab) < vocab_size:
         most_common_pair = heapq.heappop(pair_count_heap)
         most_common_pair_count = most_common_pair[0]
-        most_common_pair_bytes = most_common_pair[2]
-        if most_common_pair_count != -pair_counter[most_common_pair_bytes]:
+        most_common_pair_tuple = most_common_pair[2]
+        if most_common_pair_count != -pair_counter[most_common_pair_tuple]:
             continue
-        vocab[len(vocab)] = most_common_pair_bytes
-        # Use the lexicographically greatest representation for recording the merge
-        merges.append(max(pair_to_representations[most_common_pair_bytes]))
-        pairs_to_update = set[bytes]()
-        for index in list(pair_to_pre_token_index_set[most_common_pair_bytes]):
+        # The merged bytes is the concatenation of the two tokens
+        merged_bytes = most_common_pair_tuple[0] + most_common_pair_tuple[1]
+        vocab[len(vocab)] = merged_bytes
+        merges.append(most_common_pair_tuple)
+        pairs_to_update = set[tuple[bytes, bytes]]()
+        for index in list(pair_to_pre_token_index_set[most_common_pair_tuple]):
             pre_token, pre_token_count = pre_token_count_arr[index]
             new_pre_token_list = []
             j = 0
             while j < len(pre_token) - 1:
-                new_pair = pre_token[j : j + 2]
-                new_pair_bytes = new_pair[0] + new_pair[1]
-                if new_pair_bytes == most_common_pair_bytes:
+                # Check if this pair matches the one we're merging
+                if (pre_token[j], pre_token[j + 1]) == most_common_pair_tuple:
                     j += 2
-                    new_pre_token_list.append(new_pair_bytes)
+                    new_pre_token_list.append(merged_bytes)
                 else:
                     new_pre_token_list.append(pre_token[j])
                     j += 1
@@ -228,32 +223,27 @@ def run_train_bpe(
 
             for j in range(0, len(pre_token) - 1):
                 # invalidate old pairs
-                old_pair = pre_token[j : j + 2]
-                old_pair_bytes = old_pair[0] + old_pair[1]
-                pair_counter[old_pair_bytes] -= pre_token_count
-                pair_to_pre_token_index_set[old_pair_bytes].discard(index)
+                old_pair_tuple = (pre_token[j], pre_token[j + 1])
+                pair_counter[old_pair_tuple] -= pre_token_count
+                pair_to_pre_token_index_set[old_pair_tuple].discard(index)
                 # Track pairs whose counts changed for heap update
-                pairs_to_update.add(old_pair_bytes)
+                pairs_to_update.add(old_pair_tuple)
 
             for j in range(0, len(new_pre_token_list) - 1):
                 # add new pairs
-                new_pair = new_pre_token_list[j : j + 2]
-                new_pair_bytes = new_pair[0] + new_pair[1]
-                pair_to_representations[new_pair_bytes].add((new_pair[0], new_pair[1]))
-                pair_counter[new_pair_bytes] += pre_token_count
-                pair_to_pre_token_index_set[new_pair_bytes].add(index)
+                new_pair_tuple = (new_pre_token_list[j], new_pre_token_list[j + 1])
+                pair_counter[new_pair_tuple] += pre_token_count
+                pair_to_pre_token_index_set[new_pair_tuple].add(index)
                 # Track this pair for heap update
-                pairs_to_update.add(new_pair_bytes)
+                pairs_to_update.add(new_pair_tuple)
 
             pre_token_count_arr[index] = (new_pre_token_list, pre_token_count)
 
         # Now push all updated pairs onto the heap with their final counts
-        for pair_bytes in pairs_to_update:
-            # Use the lexicographically greatest representation for tie-breaking
-            pair_tuple = max(pair_to_representations[pair_bytes])
+        for pair_tuple in pairs_to_update:
             heapq.heappush(
                 pair_count_heap,
-                (-pair_counter[pair_bytes], ReverseTuple(pair_tuple), pair_bytes),
+                (-pair_counter[pair_tuple], ReverseTuple(pair_tuple), pair_tuple),
             )
 
     return vocab, merges

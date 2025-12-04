@@ -104,11 +104,34 @@ def find_chunk_boundaries(
 #         # Run pre-tokenization on your chunk and store the counts for each pre-token
 
 
-def pre_tokenize(chunk: str, special_tokens: list[str]) -> list[str]:
-    pattern = "|".join([regex.escape(t) for t in special_tokens])
+def pre_tokenize(chunk: str, special_tokens: list[str] | None = None) -> list[str]:
     pre_tokens = []
-    for sub_chunk in regex.splititer(pattern, chunk):
-        for match in regex.finditer(PAT, sub_chunk):
+    if special_tokens:
+        # Sort special tokens topologically: if A contains B as substring, A comes before B
+        # This ensures longer/containing tokens are matched first
+        def sort_key(token):
+            # Primary: number of other tokens this token contains (descending)
+            # Secondary: length (descending)
+            contains_count = sum(
+                1 for other in special_tokens if other != token and other in token
+            )
+            return (-contains_count, -len(token))
+
+        sorted_special_tokens = sorted(special_tokens, key=sort_key)
+        # Use capturing group to preserve special tokens in split
+        pattern = "(" + "|".join([regex.escape(t) for t in sorted_special_tokens]) + ")"
+        for part in regex.splititer(pattern, chunk):
+            if not part:  # Skip empty strings
+                continue
+            if part in special_tokens:
+                # Special token - add as is
+                pre_tokens.append(part)
+            else:
+                # Regular text - apply PAT regex
+                for match in regex.finditer(PAT, part):
+                    pre_tokens.append(match.group())
+    else:
+        for match in regex.finditer(PAT, chunk):
             pre_tokens.append(match.group())
     return pre_tokens
 
@@ -130,7 +153,9 @@ def pre_tokenize_file(
             for future in futures:
                 pre_tokens: list[str] = future.result()
                 for pre_token in pre_tokens:
-                    vocab[pre_token.encode("utf-8", errors="ignore")] += 1
+                    # Filter out special tokens - they should not be part of the training vocab
+                    if pre_token not in special_tokens:
+                        vocab[pre_token.encode("utf-8", errors="ignore")] += 1
     return vocab
 
 

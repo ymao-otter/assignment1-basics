@@ -28,7 +28,7 @@ def run_linear(
     Returns:
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
-    from transformer.linear import Linear
+    from transformer.model import Linear
 
     linear = Linear(d_in, d_out)
     linear.load_state_dict({"weight": weights})
@@ -54,7 +54,7 @@ def run_embedding(
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
 
-    from transformer.embedding import Embedding
+    from transformer.model import Embedding
 
     embedding = Embedding(vocab_size, d_model)
     embedding.load_state_dict({"weight": weights})
@@ -90,7 +90,7 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    from transformer.ffn import FFN
+    from transformer.model import FFN
 
     ffn = FFN(d_model, d_ff)
     ffn.load_state_dict(
@@ -117,7 +117,9 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    raise NotImplementedError
+    from transformer.model import scaled_dot_product_attention
+
+    return scaled_dot_product_attention(Q, K, V, mask)
 
 
 def run_multihead_self_attention(
@@ -151,7 +153,7 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    raise NotImplementedError  # TODO: Implement MultiheadSelfAttention class in model.py
 
 
 def run_multihead_self_attention_with_rope(
@@ -191,7 +193,7 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    raise NotImplementedError  # TODO: Implement MultiheadSelfAttentionWithRoPE class in model.py
 
 
 def run_rope(
@@ -213,7 +215,7 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
-    from transformer.rope import RoPE
+    from transformer.model import RoPE
 
     rope = RoPE(theta, d_k, max_seq_len)
     return rope(in_query_or_key)[:, token_positions, :]
@@ -289,7 +291,7 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    raise NotImplementedError  # TODO: Implement TransformerBlock class in model.py
 
 
 def run_transformer_lm(
@@ -371,7 +373,7 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    raise NotImplementedError  # TODO: Implement TransformerLM class in model.py
 
 
 def run_rmsnorm(
@@ -394,7 +396,7 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    from transformer.rmsnorm import RMSNorm
+    from transformer.model import RMSNorm
 
     rmsnorm = RMSNorm(d_model, eps)
     rmsnorm.load_state_dict({"gain": weights})
@@ -412,7 +414,9 @@ def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
         Float[Tensor,"..."]: of with the same shape as `in_features` with the output of applying
         SiLU to each element.
     """
-    raise NotImplementedError
+    from transformer.model import silu
+
+    return silu(in_features)
 
 
 def run_get_batch(
@@ -451,7 +455,7 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
         softmax normalizing the specified `dim`.
     """
-    from transformer.softmax import softmax
+    from transformer.nn_utils import softmax
 
     return softmax(in_features, dim)
 
@@ -485,7 +489,9 @@ def run_gradient_clipping(
 
     The gradients of the parameters (parameter.grad) should be modified in-place.
     """
-    raise NotImplementedError
+    from transformer.nn_utils import clip_gradients
+
+    return clip_gradients(parameters, max_l2_norm)
 
 
 def get_adamw_cls() -> Any:

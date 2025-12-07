@@ -183,3 +183,33 @@ def scaled_dot_product_attention(
     return einops.einsum(
         softmax_qk, V, "... queries keys, ... keys d_v -> ... queries d_v"
     )
+
+
+class MultiheadSelfAttention(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_k = d_model // num_heads
+        self.q_proj = Linear(d_model, d_model, device=device, dtype=dtype)
+        self.k_proj = Linear(d_model, d_model, device=device, dtype=dtype)
+        self.v_proj = Linear(d_model, d_model, device=device, dtype=dtype)
+        self.o_proj = Linear(d_model, d_model, device=device, dtype=dtype)
+
+    def forward(
+        self, x: Float[Tensor, " ... sequence_length d_model"]
+    ) -> Float[Tensor, " ... sequence_length d_model"]:
+        q = self.q_proj(x).view(*x.shape[:-1], self.num_heads, self.d_k)
+        k = self.k_proj(x).view(*x.shape[:-1], self.num_heads, self.d_k)
+        v = self.v_proj(x).view(*x.shape[:-1], self.num_heads, self.d_k)
+        mask = torch.triu(
+            torch.ones(x.shape[-2], x.shape[-2], device=x.device), diagonal=1
+        )
+        attn_output = scaled_dot_product_attention(q, k, v, mask)
+        return self.o_proj(attn_output.reshape(*x.shape[:-1], self.d_model))

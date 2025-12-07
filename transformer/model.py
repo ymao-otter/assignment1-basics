@@ -313,17 +313,16 @@ class TransformerLM(nn.Module):
                 for _ in range(num_layers)
             ]
         )
-        self.embeddings = Embedding(vocab_size, d_model)
+        self.token_embeddings = Embedding(vocab_size, d_model)
         self.ln_final = RMSNorm(d_model)
         self.lm_head = Linear(d_model, vocab_size)
 
     def forward(
         self, x: Int[Tensor, " ... sequence_length"]
     ) -> Float[Tensor, " ... sequence_length vocab_size"]:
-        x = self.embeddings(x)
+        x = self.token_embeddings(x)
         for layer in self.layers:
             x = layer(x)
         x = self.ln_final(x)
         logits = self.lm_head(x)
-        probs = softmax(logits, dim=-1)
-        return probs
+        return logits

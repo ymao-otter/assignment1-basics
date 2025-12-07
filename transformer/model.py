@@ -254,3 +254,37 @@ class MultiheadSelfAttention(nn.Module):
             attn_output, "... heads seq d_k -> ... seq (heads d_k)"
         )
         return self.o_proj(attn_output)
+
+
+class TransformerBlock(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        d_ff: int,
+        rope: RoPE,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        self.rope = rope
+        self.device = device
+        self.dtype = dtype
+        self.ln1 = RMSNorm(d_model, device=device, dtype=dtype)
+        self.ln2 = RMSNorm(d_model, device=device, dtype=dtype)
+        self.attn = MultiheadSelfAttention(
+            d_model, num_heads, device=device, dtype=dtype, rope=rope
+        )
+        self.ffn = FFN(d_model, d_ff, device=device, dtype=dtype)
+
+    def forward(
+        self, x: Float[Tensor, " ... sequence_length d_model"]
+    ) -> Float[Tensor, " ... sequence_length d_model"]:
+        x = self.ln1(x)
+        x = self.attn(x) + x
+        x = self.ln2(x)
+        x = self.ffn(x) + x
+        return x

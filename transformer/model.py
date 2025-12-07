@@ -3,6 +3,7 @@ import torch.nn as nn
 import einops
 from jaxtyping import Bool, Float
 from torch import Tensor
+from transformer.nn_utils import softmax
 
 
 class Linear(nn.Module):
@@ -174,4 +175,11 @@ def scaled_dot_product_attention(
     Returns:
         Output of scaled dot product attention
     """
-    raise NotImplementedError
+    qk = einops.einsum(Q, K, "... queries d_k, ... keys d_k -> ... queries keys")
+    if mask is not None:
+        inverse_mask = ~mask
+        qk = qk.masked_fill(inverse_mask, float("-inf"))
+    softmax_qk = softmax(qk / (K.shape[-1] ** 0.5))
+    return einops.einsum(
+        softmax_qk, V, "... queries keys, ... keys d_v -> ... queries d_v"
+    )

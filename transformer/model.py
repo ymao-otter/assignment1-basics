@@ -73,14 +73,14 @@ class RMSNorm(nn.Module):
         self.eps = eps
         self.device = device
         self.dtype = dtype
-        self.gain = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
+        self.weight = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.to(self.device, torch.float32)
         result = (
             x
             * torch.rsqrt(torch.mean(x**2, dim=-1, keepdim=True) + self.eps)
-            * self.gain
+            * self.weight
         )
         return result.to(self.dtype)
 
@@ -214,7 +214,7 @@ class MultiheadSelfAttention(nn.Module):
         self.q_proj = Linear(d_model, d_model, device=device, dtype=dtype)
         self.k_proj = Linear(d_model, d_model, device=device, dtype=dtype)
         self.v_proj = Linear(d_model, d_model, device=device, dtype=dtype)
-        self.o_proj = Linear(d_model, d_model, device=device, dtype=dtype)
+        self.output_proj = Linear(d_model, d_model, device=device, dtype=dtype)
         self.rope = rope
         self.token_positions = token_positions
 
@@ -253,7 +253,7 @@ class MultiheadSelfAttention(nn.Module):
         attn_output = einops.rearrange(
             attn_output, "... heads seq d_k -> ... seq (heads d_k)"
         )
-        return self.o_proj(attn_output)
+        return self.output_proj(attn_output)
 
 
 class TransformerBlock(nn.Module):
@@ -283,8 +283,6 @@ class TransformerBlock(nn.Module):
     def forward(
         self, x: Float[Tensor, " ... sequence_length d_model"]
     ) -> Float[Tensor, " ... sequence_length d_model"]:
-        x = self.ln1(x)
-        x = self.attn(x) + x
-        x = self.ln2(x)
-        x = self.ffn(x) + x
+        x = x + self.attn(self.ln1(x))
+        x = x + self.ffn(self.ln2(x))
         return x

@@ -286,3 +286,44 @@ class TransformerBlock(nn.Module):
         x = x + self.attn(self.ln1(x))
         x = x + self.ffn(self.ln2(x))
         return x
+
+
+class TransformerLM(nn.Module):
+    def __init__(
+        self,
+        vocab_size: int,
+        d_model: int,
+        num_layers: int,
+        num_heads: int,
+        d_ff: int,
+        rope_theta: float,
+        context_length: int,
+    ):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.d_model = d_model
+        self.num_layers = num_layers
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        self.rope_theta = rope_theta
+        rope = RoPE(rope_theta, d_model // num_heads, context_length)
+        self.layers = nn.ModuleList(
+            [
+                TransformerBlock(d_model, num_heads, d_ff, rope)
+                for _ in range(num_layers)
+            ]
+        )
+        self.embeddings = Embedding(vocab_size, d_model)
+        self.ln_final = RMSNorm(d_model)
+        self.lm_head = Linear(d_model, vocab_size)
+
+    def forward(
+        self, x: Int[Tensor, " ... sequence_length"]
+    ) -> Float[Tensor, " ... sequence_length vocab_size"]:
+        x = self.embeddings(x)
+        for layer in self.layers:
+            x = layer(x)
+        x = self.ln_final(x)
+        logits = self.lm_head(x)
+        probs = softmax(logits, dim=-1)
+        return probs

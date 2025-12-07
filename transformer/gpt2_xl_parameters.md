@@ -408,3 +408,204 @@ Within each transformer block:
 
 4. **Backward Pass**: Training requires a backward pass which typically costs ~2× the forward pass FLOPs, so total FLOPs per training step ≈ 3× forward pass ≈ **~13.5 trillion FLOPs**.
 
+---
+
+## Impact of Longer Context Length: GPT-2 XL with 16,384 Tokens
+
+### Configuration Change
+
+| Parameter | Original | Extended | Ratio |
+|-----------|----------|----------|-------|
+| context_length | 1,024 | 16,384 | 16× |
+| All other parameters | Same | Same | - |
+
+### Scaling Behavior
+
+Different operations scale differently with sequence length L:
+
+- **Linear Projections** (Attn Proj, FFN, LM Head): O(L) → **16× FLOPs**
+- **Attention Computation** (QK^T, Attn@V): O(L²) → **256× FLOPs**
+
+### Detailed FLOP Calculation (L = 16,384)
+
+#### Per Transformer Block
+
+**Attention Projections (Q, K, V, Output):**
+```
+FLOPs = 8 × L × d_model²
+      = 8 × 16,384 × 1,600²
+      = 335,544,320,000
+```
+
+**Attention Computation (QK^T + Attn@V):**
+```
+QK^T = 2 × L² × d_model
+     = 2 × 16,384² × 1,600
+     = 858,993,459,200
+
+Attn@V = 2 × L² × d_model
+       = 2 × 16,384² × 1,600
+       = 858,993,459,200
+
+Total = 1,717,986,918,400
+```
+
+**FFN (w1, w2, w3):**
+```
+FLOPs = 24 × L × d_model²
+      = 24 × 16,384 × 1,600²
+      = 1,006,632,960,000
+```
+
+**Total per block:**
+```
+= 335,544,320,000 + 1,717,986,918,400 + 1,006,632,960,000
+= 3,060,164,198,400
+```
+
+#### All Transformer Blocks
+
+```
+Total = 48 × 3,060,164,198,400
+      = 146,887,881,523,200
+```
+
+#### LM Head
+
+```
+FLOPs = 2 × L × d_model × vocab_size
+      = 2 × 16,384 × 1,600 × 50,257
+      = 2,634,868,326,400
+```
+
+### Total FLOPs for Extended Context
+
+```
+Total FLOPs = 146,887,881,523,200 + 2,634,868,326,400
+            = 149,522,749,849,600
+```
+
+**Total: ~149.5 Trillion FLOPs (149.5 × 10^12)**
+
+**Increase: 149.5T / 4.5T ≈ 33.1× more FLOPs**
+
+### Component Breakdown Comparison
+
+#### Per-Block FLOPs Distribution
+
+| Component | L=1,024 FLOPs | L=16,384 FLOPs | L=1,024 % | L=16,384 % | Change |
+|-----------|---------------|----------------|-----------|------------|--------|
+| **Attn Proj** | 20.97B | 335.54B | 23.1% | **11.0%** | ↓↓ **-12.1pp** |
+| **Attn Compute** | 6.71B | 1,718.0B | 7.4% | **56.1%** | ↑↑ **+48.7pp** |
+| **FFN** | 62.91B | 1,006.6B | 69.4% | **32.9%** | ↓↓ **-36.5pp** |
+| **Total/Block** | 90.60B | 3,060.2B | 100% | 100% | - |
+
+#### Overall Model FLOPs Distribution
+
+| Component | L=1,024 FLOPs | L=16,384 FLOPs | L=1,024 % | L=16,384 % | Change |
+|-----------|---------------|----------------|-----------|------------|--------|
+| **All Blocks** | 4,348.7B | 146,887.9B | 96.4% | **98.2%** | ↑ **+1.8pp** |
+| **LM Head** | 164.7B | 2,634.9B | 3.6% | **1.8%** | ↓ **-1.8pp** |
+| **Total** | 4,513.3B | 149,522.7B | 100% | 100% | - |
+
+### Key Observations
+
+#### 1. **Attention Computation Becomes Dominant** ↑↑
+
+The most dramatic change: attention computation (QK^T and Attn@V) goes from **7.4% → 56.1%** of per-block FLOPs.
+
+**Why?** This component scales as O(L²D), so increasing L by 16× causes a 256× increase in FLOPs, while other components only increase 16×.
+
+At L=16,384, computing attention scores and weighted values becomes the **primary bottleneck**.
+
+#### 2. **FFN Drops from Dominant to Secondary** ↓↓
+
+FFN drops from **69.4% → 32.9%** of per-block FLOPs.
+
+**Why?** FFN scales as O(LD²), only growing linearly with sequence length. While absolute FLOPs still increase 16×, it's dwarfed by the 256× increase in attention.
+
+#### 3. **Attention Projections Shrink Proportionally** ↓
+
+Attention projections drop from **23.1% → 11.0%**.
+
+**Why?** Like FFN, these scale as O(LD²), so they grow 16× but become smaller relative to the now-massive attention computation.
+
+#### 4. **LM Head Becomes Even More Negligible** ↓
+
+LM Head decreases from **3.6% → 1.8%** of total FLOPs.
+
+**Why?** LM head scales as O(LD × vocab_size), growing only 16×, while total computation grows 33×.
+
+#### 5. **Total FLOPs Increase is Superlinear**
+
+Total FLOPs increase **33.1×** despite sequence length only increasing 16×.
+
+**Why?** The quadratic O(L²) term in attention computation dominates. If all operations were O(L), we'd see exactly 16× increase. The extra 2.1× comes from the L² scaling.
+
+### Practical Implications
+
+#### 1. **Memory Bandwidth Becomes Critical**
+
+With 56% of FLOPs in attention computation, memory access patterns matter enormously:
+- QK^T creates massive (16,384 × 16,384) attention matrices per head
+- Memory for attention scores: 25 heads × 16,384² × 4 bytes ≈ **16 GB** per layer just for attention matrices
+- Total across 48 layers: **768 GB** of intermediate attention tensors
+
+This is why **Flash Attention** and similar optimizations are crucial for long contexts.
+
+#### 2. **Optimization Priorities Flip**
+
+| Component | L=1,024 Priority | L=16,384 Priority |
+|-----------|------------------|-------------------|
+| FFN | **1st** (69.4%) | **2nd** (32.9%) |
+| Attn Compute | 3rd (7.4%) | **1st** (56.1%) |
+| Attn Proj | 2nd (23.1%) | 3rd (11.0%) |
+
+For long contexts, optimizing attention computation (e.g., Flash Attention, sparse attention, linear attention approximations) yields the most benefit.
+
+#### 3. **Quadratic Wall**
+
+The O(L²) scaling means:
+- L = 32,768 (32K): ~**598 trillion FLOPs** (4× more than L=16K)
+- L = 65,536 (64K): ~**2.39 quadrillion FLOPs** (4× more than L=32K)
+- L = 131,072 (128K): ~**9.54 quadrillion FLOPs** (4× more than L=64K)
+
+This quadratic growth is why research focuses on:
+- **Sparse attention** (only attend to subset of tokens)
+- **Linear attention** (approximate attention with linear complexity)
+- **Sliding window** (local attention only)
+- **Hierarchical attention** (multi-scale processing)
+
+#### 4. **Flash Attention Impact**
+
+At L=1,024: Flash Attention optimizes 7.4% of block FLOPs
+At L=16,384: Flash Attention optimizes **56.1%** of block FLOPs
+
+**Flash Attention is 7.6× more impactful** for long contexts!
+
+#### 5. **Computation vs Memory Tradeoff**
+
+Standard attention: 
+- Materializes full (L × L) attention matrices
+- Memory: O(L²)
+- Recomputation: None
+
+Flash Attention:
+- Never materializes full attention matrices  
+- Memory: O(L)
+- Recomputation: Some (but faster due to better memory access)
+
+For L=16,384, the memory savings (256×) are essential for feasibility.
+
+### Summary Table: Context Length Impact
+
+| Metric | L=1,024 | L=16,384 | Ratio |
+|--------|---------|----------|-------|
+| **Total FLOPs** | 4.5T | 149.5T | **33.1×** |
+| **Attn Compute %** | 7.4% | 56.1% | **7.6× more important** |
+| **FFN %** | 69.4% | 32.9% | **2.1× less important** |
+| **Attn Memory** | ~0.5 GB | ~768 GB | **1536×** |
+| **Optimization Focus** | FFN | Attention | **Paradigm shift** |
+
+**Conclusion**: Extending context length fundamentally changes the computational bottleneck from feed-forward layers to attention computation, making attention-specific optimizations (Flash Attention, sparse patterns) critically important.
+

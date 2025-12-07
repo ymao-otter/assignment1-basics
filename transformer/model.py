@@ -177,7 +177,7 @@ def scaled_dot_product_attention(
     """
     qk = einops.einsum(Q, K, "... queries d_k, ... keys d_k -> ... queries keys")
     if mask is not None:
-        inverse_mask = ~mask
+        inverse_mask = ~mask.bool()
         qk = qk.masked_fill(inverse_mask, float("-inf"))
     softmax_qk = softmax(qk / (K.shape[-1] ** 0.5))
     return einops.einsum(
@@ -205,11 +205,32 @@ class MultiheadSelfAttention(nn.Module):
     def forward(
         self, x: Float[Tensor, " ... sequence_length d_model"]
     ) -> Float[Tensor, " ... sequence_length d_model"]:
-        q = self.q_proj(x).view(*x.shape[:-1], self.num_heads, self.d_k)
-        k = self.k_proj(x).view(*x.shape[:-1], self.num_heads, self.d_k)
-        v = self.v_proj(x).view(*x.shape[:-1], self.num_heads, self.d_k)
-        mask = torch.triu(
-            torch.ones(x.shape[-2], x.shape[-2], device=x.device), diagonal=1
+        seq_len = x.shape[-2]
+
+        # Reshape to (batch, num_heads, seq_len, d_k) directly using einops
+        q = einops.rearrange(
+            self.q_proj(x),
+            "... seq (heads d_k) -> ... heads seq d_k",
+            heads=self.num_heads,
         )
+        k = einops.rearrange(
+            self.k_proj(x),
+            "... seq (heads d_k) -> ... heads seq d_k",
+            heads=self.num_heads,
+        )
+        v = einops.rearrange(
+            self.v_proj(x),
+            "... seq (heads d_k) -> ... heads seq d_k",
+            heads=self.num_heads,
+        )
+
+        # Create causal mask: 1s where we can attend (lower triangle), 0s where we can't (upper triangle)
+        mask = torch.tril(torch.ones(seq_len, seq_len, device=x.device))
+
         attn_output = scaled_dot_product_attention(q, k, v, mask)
-        return self.o_proj(attn_output.reshape(*x.shape[:-1], self.d_model))
+
+        # Reshape back to (batch, seq_len, d_model)
+        attn_output = einops.rearrange(
+            attn_output, "... heads seq d_k -> ... seq (heads d_k)"
+        )
+        return self.o_proj(attn_output)

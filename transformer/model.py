@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import einops
-from jaxtyping import Bool, Float
+from jaxtyping import Bool, Float, Int
 from torch import Tensor
 from transformer.nn_utils import softmax
 
@@ -109,11 +109,23 @@ class RoPE(nn.Module):
                 self.blocks[i, k, 1, 0] = torch.sin(l_theta_tensor)
                 self.blocks[i, k, 1, 1] = torch.cos(l_theta_tensor)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, token_positions: Int[Tensor, "..."] | None = None
+    ) -> torch.Tensor:
         seq_len = x.shape[-2]
         *leading, d = x.shape
         x_blocks = x.view(*leading, d // 2, 2)
-        val = einops.einsum(x_blocks, self.blocks[:seq_len], "... l, ... j l -> ... j")
+
+        # Select rotation matrices for the appropriate positions
+        # If token_positions provided, use those specific positions;
+        # otherwise use sequential positions 0, 1, 2, ..., seq_len-1
+        if token_positions is not None:
+            rotation_matrices = self.blocks[token_positions]
+        else:
+            rotation_matrices = self.blocks[:seq_len]
+
+        # Apply rotations using einsum (broadcasting handles shape differences)
+        val = einops.einsum(x_blocks, rotation_matrices, "... l, ... j l -> ... j")
         return val.reshape(x.shape)
 
 
@@ -192,6 +204,8 @@ class MultiheadSelfAttention(nn.Module):
         num_heads: int,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
+        rope: RoPE | None = None,
+        token_positions: Int[Tensor, " ... sequence_length"] | None = None,
     ):
         super().__init__()
         self.d_model = d_model
@@ -201,6 +215,8 @@ class MultiheadSelfAttention(nn.Module):
         self.k_proj = Linear(d_model, d_model, device=device, dtype=dtype)
         self.v_proj = Linear(d_model, d_model, device=device, dtype=dtype)
         self.o_proj = Linear(d_model, d_model, device=device, dtype=dtype)
+        self.rope = rope
+        self.token_positions = token_positions
 
     def forward(
         self, x: Float[Tensor, " ... sequence_length d_model"]
@@ -213,11 +229,15 @@ class MultiheadSelfAttention(nn.Module):
             "... seq (heads d_k) -> ... heads seq d_k",
             heads=self.num_heads,
         )
+        if self.rope is not None:
+            q = self.rope(q, self.token_positions)
         k = einops.rearrange(
             self.k_proj(x),
             "... seq (heads d_k) -> ... heads seq d_k",
             heads=self.num_heads,
         )
+        if self.rope is not None:
+            k = self.rope(k, self.token_positions)
         v = einops.rearrange(
             self.v_proj(x),
             "... seq (heads d_k) -> ... heads seq d_k",

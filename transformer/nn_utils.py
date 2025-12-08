@@ -33,7 +33,10 @@ def cross_entropy(
     Returns:
         Average cross-entropy loss (scalar tensor)
     """
-    raise NotImplementedError
+    batch_idx = torch.arange(inputs.shape[0])
+    log_probs = torch.log_softmax(inputs, dim=-1)
+    nll = log_probs[batch_idx, targets]  # negative log likelihood
+    return -nll.mean()
 
 
 def clip_gradients(

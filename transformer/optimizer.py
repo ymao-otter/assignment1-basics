@@ -44,9 +44,8 @@ class AdamW(torch.optim.Optimizer):
                     * (1 - beta2 ** state["step"]) ** 0.5
                     / (1 - beta1 ** state["step"])
                 )
-                p.data = p.data - lr_t * state["exp_avg"] / (
+                p.data = p.data * (1 - lr * weight_decay) - lr_t * state["exp_avg"] / (
                     state["exp_avg_sq"].sqrt() + eps
                 )
-                p.data = p.data * (1 - lr * weight_decay)
 
         return loss

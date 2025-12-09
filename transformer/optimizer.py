@@ -34,7 +34,6 @@ class AdamW(torch.optim.Optimizer):
                     state["step"] = 0
                     state["exp_avg"] = torch.zeros_like(p.data)
                     state["exp_avg_sq"] = torch.zeros_like(p.data)
-                exp_avg, exp_avg_sq = state["exp_avg"], state["exp_avg_sq"]
                 state["step"] += 1
                 state["exp_avg"] = beta1 * state["exp_avg"] + (1 - beta1) * grad
                 state["exp_avg_sq"] = (
@@ -45,7 +44,9 @@ class AdamW(torch.optim.Optimizer):
                     * (1 - beta2 ** state["step"]) ** 0.5
                     / (1 - beta1 ** state["step"])
                 )
-                p.data = p.data - lr_t * exp_avg / (exp_avg_sq.sqrt() + eps)
+                p.data = p.data - lr_t * state["exp_avg"] / (
+                    state["exp_avg_sq"].sqrt() + eps
+                )
                 p.data = p.data * (1 - lr * weight_decay)
 
         return loss

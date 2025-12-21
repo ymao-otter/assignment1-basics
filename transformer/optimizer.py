@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import math
 
 
 class AdamW(torch.optim.Optimizer):
@@ -49,3 +50,25 @@ class AdamW(torch.optim.Optimizer):
                 )
 
         return loss
+
+
+def get_learning_rate(
+    step, max_learning_rate, min_learning_rate, warmup_iters, cosine_cycle_iters
+):
+    if step < warmup_iters:
+        return max_learning_rate * step / warmup_iters
+    if step < cosine_cycle_iters:
+        return (
+            min_learning_rate
+            + (max_learning_rate - min_learning_rate)
+            * (
+                1
+                + math.cos(
+                    math.pi
+                    * (step - warmup_iters)
+                    / (cosine_cycle_iters - warmup_iters)
+                )
+            )
+            / 2
+        )
+    return min_learning_rate

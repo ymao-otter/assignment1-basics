@@ -51,4 +51,18 @@ def clip_gradients(
 
     The gradients are modified in-place.
     """
-    raise NotImplementedError
+    # Collect all gradients
+    grads = [p.grad for p in parameters if p.grad is not None]
+
+    if len(grads) == 0:
+        return
+
+    # Compute total L2 norm across all gradients
+    total_norm_squared = sum([(g**2).sum() for g in grads], start=torch.tensor(0.0))
+    total_norm = torch.sqrt(total_norm_squared)
+
+    # Scale gradients if norm exceeds threshold
+    if total_norm > max_l2_norm:
+        clip_coef = max_l2_norm / (total_norm + 1e-6)
+        for g in grads:
+            g.mul_(clip_coef)

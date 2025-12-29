@@ -136,26 +136,43 @@ def pre_tokenize(chunk: str, special_tokens: list[str] | None = None) -> list[st
     return pre_tokens
 
 
+def _process_chunk_from_file(
+    input_path: str | os.PathLike, start: int, end: int, special_tokens: list[str]
+) -> Counter[bytes]:
+    """Worker function that reads and processes a chunk directly from file."""
+    vocab = Counter[bytes]()
+    with open_binary(input_path) as f:
+        f.seek(start)
+        chunk = f.read(end - start).decode("utf-8", errors="ignore")
+        pre_tokens = pre_tokenize(chunk, special_tokens)
+        for pre_token in pre_tokens:
+            # Filter out special tokens - they should not be part of the training vocab
+            if pre_token not in special_tokens:
+                vocab[pre_token.encode("utf-8", errors="ignore")] += 1
+    return vocab
+
+
 def pre_tokenize_file(
     input_path: str | os.PathLike, special_tokens: list[str]
 ) -> dict[bytes, int]:
-    num_processes = mp.cpu_count()
+    num_processes = 2  # mp.cpu_count()
     vocab = Counter[bytes]()
     with open_binary(input_path) as f:
         boundaries = find_chunk_boundaries(f, num_processes, END_OF_TEXT)
-        with ProcessPoolExecutor(max_workers=num_processes) as executor:
-            futures = []
-            for start, end in zip(boundaries[:-1], boundaries[1:]):
-                f.seek(start)
-                chunk = f.read(end - start).decode("utf-8", errors="ignore")
-                futures.append(executor.submit(pre_tokenize, chunk, special_tokens))
-            # Process futures in order to ensure deterministic behavior
-            for future in futures:
-                pre_tokens: list[str] = future.result()
-                for pre_token in pre_tokens:
-                    # Filter out special tokens - they should not be part of the training vocab
-                    if pre_token not in special_tokens:
-                        vocab[pre_token.encode("utf-8", errors="ignore")] += 1
+
+    # Process chunks in parallel without loading all into main process memory
+    with ProcessPoolExecutor(max_workers=num_processes) as executor:
+        futures = []
+        for start, end in zip(boundaries[:-1], boundaries[1:]):
+            futures.append(
+                executor.submit(
+                    _process_chunk_from_file, input_path, start, end, special_tokens
+                )
+            )
+        # Merge results from all workers
+        for future in futures:
+            chunk_vocab = future.result()
+            vocab.update(chunk_vocab)
     return vocab
 
 

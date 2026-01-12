@@ -321,10 +321,28 @@ def train_bpe_to_files(
     vocab, merges = run_train_bpe(input_path, vocab_size, special_tokens, **kwargs)
 
     # Save vocabulary as JSON (inverted: token string -> token ID)
+    # Fix: Only encode bytes 128-255 with hex, let UTF-8 handle 0-127
+    import base64
     vocab_dict = {}
     for token_id, token_bytes in vocab.items():
-        # Decode bytes to string, use UTF-8 with replacement for non-UTF8 bytes
-        token_str = token_bytes.decode("utf-8", errors="replace")
+        # Handle single bytes (0-255)
+        if len(token_bytes) == 1:
+            byte_val = token_bytes[0]
+            if byte_val >= 128:
+                # Bytes 128-255 are not valid UTF-8, use hex encoding
+                token_str = f"<0x{byte_val:02X}>"
+            else:
+                # Bytes 0-127 are valid ASCII/UTF-8, decode normally
+                # JSON will automatically escape special chars like \n, ", etc.
+                token_str = token_bytes.decode("utf-8")
+        else:
+            # Multi-byte sequences
+            try:
+                token_str = token_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                # For non-UTF8 sequences, use base64 with special prefix
+                token_str = "<b64:" + base64.b64encode(token_bytes).decode('ascii') + ">"
+        
         vocab_dict[token_str] = token_id
 
     with open(vocab_output_path, "w", encoding="utf-8") as f:
@@ -332,8 +350,21 @@ def train_bpe_to_files(
 
     # Save merges as space-separated text file
     with open(merges_output_path, "w", encoding="utf-8") as f:
+        def encode_token(token_bytes):
+            """Encode token bytes to string for merges file."""
+            if len(token_bytes) == 1:
+                byte_val = token_bytes[0]
+                if byte_val >= 128:
+                    return f"<0x{byte_val:02X}>"
+                else:
+                    return token_bytes.decode("utf-8")
+            else:
+                try:
+                    return token_bytes.decode("utf-8")
+                except UnicodeDecodeError:
+                    return "<b64:" + base64.b64encode(token_bytes).decode('ascii') + ">"
+        
         for token1, token2 in merges:
-            # Decode both tokens to strings
-            token1_str = token1.decode("utf-8", errors="replace")
-            token2_str = token2.decode("utf-8", errors="replace")
+            token1_str = encode_token(token1)
+            token2_str = encode_token(token2)
             f.write(f"{token1_str} {token2_str}\n")

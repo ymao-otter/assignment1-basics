@@ -36,20 +36,43 @@ class Tokenizer:
         merges_filepath: str | os.PathLike,
         special_tokens: list[str] | None = None,
     ) -> "Tokenizer":
+        import base64
+        
+        def decode_token(token_str: str) -> bytes:
+            """Decode a token string to bytes, handling special encodings."""
+            # Handle hex-encoded bytes (128-255): <0xHH>
+            if token_str.startswith("<0x") and token_str.endswith(">"):
+                hex_str = token_str[3:-1]
+                return bytes([int(hex_str, 16)])
+            # Handle base64-encoded tokens: <b64:...>
+            elif token_str.startswith("<b64:") and token_str.endswith(">"):
+                b64_str = token_str[5:-1]
+                return base64.b64decode(b64_str)
+            # Regular UTF-8 string (includes ASCII bytes 0-127)
+            else:
+                return token_str.encode("utf-8")
+        
         with open(vocab_filepath) as f:
             vocab_dict = json.load(f)
-            # Convert string keys to bytes values, and handle both formats
+            # Convert string keys to bytes values
             vocab = {}
             for key, value in vocab_dict.items():
-                # The vocab file maps token (as string) to id (as int)
-                # We need to create a dict[int, bytes] mapping id to token bytes
-                token_bytes = key.encode("utf-8")
+                token_bytes = decode_token(key)
                 vocab[value] = token_bytes
+        
         with open(merges_filepath) as f:
-            merges = [
-                (token1.encode("utf-8"), token2.encode("utf-8"))
-                for token1, token2 in [line.split(" ") for line in f]
-            ]
+            merges = []
+            for line in f:
+                line = line.rstrip('\n\r')  # Remove newline characters
+                if not line:  # Skip empty lines
+                    continue
+                # Split by the first space only (maxsplit=1)
+                # This handles cases where token1 or token2 might contain spaces
+                parts = line.split(" ", 1)
+                if len(parts) == 2:
+                    token1, token2 = parts
+                    merges.append((decode_token(token1), decode_token(token2)))
+                # If only 1 part, skip (malformed line)
         return cls(vocab, merges, special_tokens)
 
     def encode(self, text: str) -> list[int]:

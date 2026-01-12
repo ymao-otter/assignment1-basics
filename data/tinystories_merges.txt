@@ -438,7 +438,7 @@ au se
  ex c
 ur p
 way s
-� �
+<0xE2> <0x80>
  out side
  laug hed
  loo k
@@ -838,11 +838,11 @@ ir ed
 ill y
  he ar
  u se
-� �
+<b64:4oA=> <0x9D>
 H i
  p a
  ke pt
-� �
+<b64:4oA=> <0x9C>
 Th at
  squ irrel
 e ar
@@ -1059,7 +1059,7 @@ ar ing
  laug h
  d el
  pie ce
-� �
+<b64:4oA=> <0x99>
 er ed
  M r
  ro ll
@@ -4351,7 +4351,7 @@ Gra ndma
  ho l
 ic er
  hol iday
-  �
+  <b64:4oA=>
  bark s
 as on
  throw ing
@@ -4825,7 +4825,7 @@ u esday
  app reci
  S ophie
  Joe y
- � �
+<b64:IOKA> <0x93>
  eag erly
  sail ing
  Co co
@@ -6774,7 +6774,7 @@ us ing
 ing o
  refle ction
  hus band
-� �
+<b64:4oA=> <0x94>
 T ake
 ri ver
  cl ues
@@ -6799,7 +6799,7 @@ u de
  zebra s
  hedge hog
  a ff
- � �
+<b64:IOKA> <0x98>
  borrow ed
  Ro llie
  snow fl
@@ -8052,7 +8052,7 @@ p o
  P op
  Mad die
 Sad ly
- � �
+<b64:IOKA> <0x94>
  travel s
  al iens
  test s
@@ -8720,7 +8720,7 @@ F ire
  Mad dy
  Dan iel
  An imal
-� �
+<b64:4oA=> <0xA6>
 r or
  P ig
  M ine

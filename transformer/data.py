@@ -13,8 +13,10 @@ def data_loading(
     labels from the dataset.
     """
     num_samples = len(x)
-    starting_indices = random.sample(
-        list(np.arange(num_samples - context_length)), k=batch_size
+    # Fixed: Use np.random.randint instead of creating a huge list
+    # This avoids allocating 32 GB of RAM for large datasets!
+    starting_indices = np.random.randint(
+        0, num_samples - context_length, size=batch_size
     )
     input_batch = torch.empty(batch_size, context_length, device=device)
     target_batch = torch.empty(batch_size, context_length, device=device)

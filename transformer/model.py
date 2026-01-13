@@ -306,6 +306,7 @@ class TransformerLM(nn.Module):
         self.num_heads = num_heads
         self.d_ff = d_ff
         self.rope_theta = rope_theta
+        self.context_length = context_length
         rope = RoPE(rope_theta, d_model // num_heads, context_length)
         self.layers = nn.ModuleList(
             [
